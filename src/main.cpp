@@ -6,11 +6,13 @@
 #include <cstdarg>
 #include <SPI.h>
 #include <SerialFlash.h>
+#include <string>
 
 #include "main.h"
 #include "arduino_secrets.h"
 #include "headCrypto.h"
 #include "slaveSPI.h"
+#include "headMQTT_NB.h"
 
 // initialize variables
 byte buf[1];
@@ -23,6 +25,16 @@ byte buf[1];
 const int slavePin = 4;
 
 void setup() {
+  // put your setup code here, to run once:
+  setupECCX08(&sslClient);
+
+  setupMQTT_NB(&mqttClient, &nbAccess, &gprs);
+
+  _currentTime = millis()/1000;
+  _lastMessagePublished = _currentTime;
+
+  initDataBuffer();
+
 
   pinMode(slavePin, INPUT_PULLUP);
   pinMode(MOSI, INPUT);
@@ -45,7 +57,7 @@ uint8_t circ_shift_left(uint8_t data, uint8_t n){
 void SERCOM1_Handler(){
   uint8_t data = 0;
   uint8_t interrupts = SERCOM1->SPI.INTFLAG.reg; //Read SPI interrupt register
-  buf[0] = data;
+  // buf[0] = data;
   #ifdef DEBUG
     Serial.println("In SPI Interrupt");
     Serial.print("Interrupt Flag: "); 
@@ -85,56 +97,59 @@ void SERCOM1_Handler(){
   if (SERCOM1->SPI.INTFLAG.bit.ERROR && SERCOM1->SPI.INTENSET.bit.ERROR){
     SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_ERROR;
   }
-
-  // if(interrupts & (1<<3)) // 8 = 1000 = SSL
-  // {
-  //   #ifdef DEBUG
-  //     Serial.println("SPI SSL Interupt");
-  //   #endif
-  //   SERCOM1->SPI.INTFLAG.bit.SSL = 1; //clear slave select interrupt
-  //   data = SERCOM1->SPI.DATA.reg; //Read data register
-  //   #ifdef DEBUG
-  //     Serial.print("DATA: "); Serial.println(data);
-  //   #endif
-  //   // SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
-  // }
-  
-  // This is where data is received, and is written to a buffer, which is used in the main loop
-  // if(interrupts & (1<<2)) // 4 = 0100 = RXC
-  // {
-  //   SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
-  //   data = SERCOM1->SPI.DATA.bit.DATA; //Read data register
-  //   Serial.print("DATA value is:   ");
-  //   Serial.println(data << 1);
-  //   buf[0] = data; // copy data to buffer
-  //   #ifdef DEBUG
-  //     Serial.println("SPI Data Received Complete Interrupt");
-  //     Serial.print("DATA in DEBUG: ");
-  //     Serial.println(data);
-  //   #endif
-    
-  // }
-  
-  // if(interrupts & (1<<1)) // 2 = 0010 = TXC
-  // {
-  //   #ifdef DEBUG
-  //     Serial.println("SPI Data Transmit Complete Interrupt");
-  //   #endif
-  //   SERCOM1->SPI.INTFLAG.bit.TXC = 1; //clear receive complete interrupt
-  // }
-  
-  // if(interrupts & (1<<0)) // 1 = 0001 = DRE
-  // {
-  //   #ifdef DEBUG
-  //     Serial.println("SPI Data Register Empty Interrupt");
-  //   #endif
-  //   // SERCOM1->SPI.DATA.reg = 0xAA;
-  //   // SERCOM1->SPI.INTFLAG.bit.DRE = 1;
-  // }
   
   #ifdef DEBUG
     Serial.println("-----------------------------------");
   #endif
+
+
+    // Get the SPI data
+
+  // Send using MQTT over the NB network\
+  // poll for new MQTT messages and send keep alives if still connected (useless otherwise)
+  if (nbAccess.status() == NB_READY && gprs.status() == GPRS_READY &&
+      mqttClient.connected())
+    mqttClient.poll();
+
+  _currentTime = millis()/1000;
+
+  if (_currentTime - _lastMessagePublished > T_BETWEEN_MESSAGES)
+  {
+    if (nbAccess.status() != NB_READY || gprs.status() != GPRS_READY) 
+    {
+      endCurrentDataSegment();
+      createNewDataSegment(NOT_MEASURING);
+      connectNB(&nbAccess, &gprs);
+      endCurrentDataSegment();
+    }
+
+    if (!mqttClient.connected())
+    {
+      endCurrentDataSegment();
+      createNewDataSegment(NOT_MEASURING);
+      // connectMQTT();
+      endCurrentDataSegment();
+    } 
+
+    if (nbAccess.status() == NB_READY && gprs.status() == GPRS_READY &&
+      mqttClient.connected())
+    {
+      endCurrentDataSegment();
+      // String message = makeMessageFromData();
+      String message = String(buf[0]);
+      Serial.println(message.c_str());
+      Serial.println("\n");
+      publishMessage(message);
+      clearDataBuffer();
+      initDataBuffer();
+    }
+    /*Even if the board isn't connected, we set up the time of _lastMessagePublished
+    so that it retries connecting in T_BETWEEN_MESSAGES, and still measures in between.*/
+    _lastMessagePublished = _currentTime;
+    _lastDetectedState = 20;
+  }
+
+
 }
 
 void loop() {
