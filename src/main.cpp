@@ -41,6 +41,7 @@ void setup() {
 void SERCOM1_Handler(){
   uint8_t data = 0;
   uint8_t interrupts = SERCOM1->SPI.INTFLAG.reg; //Read SPI interrupt register
+  buf[0] = data;
   #ifdef DEBUG
     Serial.println("In SPI Interrupt");
     Serial.print("Interrupt: "); 
@@ -61,20 +62,19 @@ void SERCOM1_Handler(){
   }
   
   // This is where data is received, and is written to a buffer, which is used in the main loop
-  if((interrupts & (1<<2)) || (interrupts & (B101))) // 4 = 0100 = RXC
+  if(interrupts & (1<<2)) // 4 = 0100 = RXC
   {
-    #ifdef DEBUG
-      Serial.println("SPI Data Received Complete Interrupt");
-    #endif
-    data = SERCOM1->SPI.DATA.reg; //Read data register
-    Serial.print("DATa:   ");
-    Serial.println(data);
+    SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
+    data = SERCOM1->SPI.DATA.bit.DATA; //Read data register
+    Serial.print("DATA value is:   ");
+    Serial.println(data << 1);
     buf[0] = data; // copy data to buffer
     #ifdef DEBUG
-      Serial.print("DATA: ");
+      Serial.println("SPI Data Received Complete Interrupt");
+      Serial.print("DATA in DEBUG: ");
       Serial.println(data);
     #endif
-    // SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
+    
   }
   
   if(interrupts & (1<<1)) // 2 = 0010 = TXC
@@ -90,8 +90,8 @@ void SERCOM1_Handler(){
     #ifdef DEBUG
       Serial.println("SPI Data Register Empty Interrupt");
     #endif
-    SERCOM1->SPI.DATA.reg = 0xAA;
-    SERCOM1->SPI.INTFLAG.bit.DRE = 1;
+    // SERCOM1->SPI.DATA.reg = 0xAA;
+    // SERCOM1->SPI.INTFLAG.bit.DRE = 1;
   }
   
   #ifdef DEBUG
@@ -103,6 +103,7 @@ void SERCOM1_Handler(){
 
 void loop() {
   // put your main code here, to run repeatedly
+  Serial.print("Buffer data: ");
   Serial.println(buf[0]);
   delay(1000);
 }

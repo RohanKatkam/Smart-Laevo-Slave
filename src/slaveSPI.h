@@ -115,7 +115,7 @@ Px(2n+0/1) corresponds to Portx, PMUX[n] Even=0/Odd=1
   // SERCOM1->SPI.INTENSET.bit.RXC = 0x1; //Receive complete interrupt
   // SERCOM1->SPI.INTENSET.bit.TXC = 0x1; //Receive complete interrupt
   // SERCOM1->SPI.INTENSET.bit.ERROR = 0x1; //Receive complete interrupt
-  SERCOM1->SPI.INTENSET.bit.DRE = 0x1; //Data Register Empty interrupt
+  SERCOM1->SPI.INTENSET.bit.DRE = 0x0; //Data Register Empty interrupt
   
   //init SPI CLK  
   SERCOM1->SPI.BAUD.reg = SERCOM_FREQ_REF / (2*4000000u)-1;
