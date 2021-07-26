@@ -38,68 +38,104 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(slavePin), SERCOM1_Handler, FALLING);
 }
 
+uint8_t circ_shift_left(uint8_t data, uint8_t n){
+  return (data << n) | (data >> (8 - n));
+}
+
 void SERCOM1_Handler(){
   uint8_t data = 0;
   uint8_t interrupts = SERCOM1->SPI.INTFLAG.reg; //Read SPI interrupt register
   buf[0] = data;
   #ifdef DEBUG
     Serial.println("In SPI Interrupt");
-    Serial.print("Interrupt: "); 
+    Serial.print("Interrupt Flag: "); 
     Serial.println(interrupts);
   #endif
 
-  if(interrupts & (1<<3)) // 8 = 1000 = SSL
-  {
-    #ifdef DEBUG
-      Serial.println("SPI SSL Interupt");
-    #endif
-    SERCOM1->SPI.INTFLAG.bit.SSL = 1; //clear slave select interrupt
-    data = SERCOM1->SPI.DATA.reg; //Read data register
-    #ifdef DEBUG
-      Serial.print("DATA: "); Serial.println(data);
-    #endif
-    // SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
+  if (SERCOM1->SPI.INTFLAG.bit.SSL && SERCOM1->SPI.INTENSET.bit.SSL) {
+    // FLAG IS SET WHEN nSS IS DETECTED GOING LOW
+    // you can initialize the variables here, probably start you connection here
+    SERCOM1->SPI.DATA.reg = 0xAB;											// preload shift register with first outgoing data			
+		SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_SSL;
   }
-  
-  // This is where data is received, and is written to a buffer, which is used in the main loop
-  if(interrupts & (1<<2)) // 4 = 0100 = RXC
-  {
-    SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
+
+  if (SERCOM1->SPI.INTFLAG.bit.DRE && SERCOM1->SPI.INTENSET.bit.DRE){
+    // no need to send any data to the master for now
+    SERCOM1->SPI.DATA.reg = 0xAC; // this is dummy write
+  }
+
+  if (SERCOM1->SPI.INTFLAG.bit.TXC && SERCOM1->SPI.INTFLAG.bit.TXC) {
+    // this bit is set when SS is pulled high
+    SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_TXC;
+  }
+
+
+  if (SERCOM1->SPI.INTFLAG.bit.RXC && SERCOM1->SPI.INTENSET.bit.RXC) {
     data = SERCOM1->SPI.DATA.bit.DATA; //Read data register
     Serial.print("DATA value is:   ");
-    Serial.println(data << 1);
+    Serial.println(circ_shift_left(data, 1));
     buf[0] = data; // copy data to buffer
     #ifdef DEBUG
       Serial.println("SPI Data Received Complete Interrupt");
       Serial.print("DATA in DEBUG: ");
       Serial.println(data);
     #endif
+  }
+
+  if (SERCOM1->SPI.INTFLAG.bit.ERROR && SERCOM1->SPI.INTENSET.bit.ERROR){
+    SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_ERROR;
+  }
+
+  // if(interrupts & (1<<3)) // 8 = 1000 = SSL
+  // {
+  //   #ifdef DEBUG
+  //     Serial.println("SPI SSL Interupt");
+  //   #endif
+  //   SERCOM1->SPI.INTFLAG.bit.SSL = 1; //clear slave select interrupt
+  //   data = SERCOM1->SPI.DATA.reg; //Read data register
+  //   #ifdef DEBUG
+  //     Serial.print("DATA: "); Serial.println(data);
+  //   #endif
+  //   // SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
+  // }
+  
+  // This is where data is received, and is written to a buffer, which is used in the main loop
+  // if(interrupts & (1<<2)) // 4 = 0100 = RXC
+  // {
+  //   SERCOM1->SPI.INTFLAG.bit.RXC = 1; //clear receive complete interrupt
+  //   data = SERCOM1->SPI.DATA.bit.DATA; //Read data register
+  //   Serial.print("DATA value is:   ");
+  //   Serial.println(data << 1);
+  //   buf[0] = data; // copy data to buffer
+  //   #ifdef DEBUG
+  //     Serial.println("SPI Data Received Complete Interrupt");
+  //     Serial.print("DATA in DEBUG: ");
+  //     Serial.println(data);
+  //   #endif
     
-  }
+  // }
   
-  if(interrupts & (1<<1)) // 2 = 0010 = TXC
-  {
-    #ifdef DEBUG
-      Serial.println("SPI Data Transmit Complete Interrupt");
-    #endif
-    SERCOM1->SPI.INTFLAG.bit.TXC = 1; //clear receive complete interrupt
-  }
+  // if(interrupts & (1<<1)) // 2 = 0010 = TXC
+  // {
+  //   #ifdef DEBUG
+  //     Serial.println("SPI Data Transmit Complete Interrupt");
+  //   #endif
+  //   SERCOM1->SPI.INTFLAG.bit.TXC = 1; //clear receive complete interrupt
+  // }
   
-  if(interrupts & (1<<0)) // 1 = 0001 = DRE
-  {
-    #ifdef DEBUG
-      Serial.println("SPI Data Register Empty Interrupt");
-    #endif
-    // SERCOM1->SPI.DATA.reg = 0xAA;
-    // SERCOM1->SPI.INTFLAG.bit.DRE = 1;
-  }
+  // if(interrupts & (1<<0)) // 1 = 0001 = DRE
+  // {
+  //   #ifdef DEBUG
+  //     Serial.println("SPI Data Register Empty Interrupt");
+  //   #endif
+  //   // SERCOM1->SPI.DATA.reg = 0xAA;
+  //   // SERCOM1->SPI.INTFLAG.bit.DRE = 1;
+  // }
   
   #ifdef DEBUG
-    Serial.println("----------");
+    Serial.println("-----------------------------------");
   #endif
 }
-
-// For handler use SERCOM1 handler 
 
 void loop() {
   // put your main code here, to run repeatedly

@@ -36,13 +36,19 @@ void Sercom1init()
     //Set PA19 as output (MISO)
     PORT->Group[PORTA].PINCFG[16].bit.PMUXEN = 0x1; //Enable Peripheral Multiplexing for SERCOM1 SPI PA16 Arduino PIN11
     PORT->Group[PORTA].PMUX[8].bit.PMUXE = 0x2; //SERCOM 1 is selected for peripheral use of this pad (0x2 selects peripheral function C: SERCOM)
-    // PORT->Group[PORTA].DIRCLR.reg = (0x00000001 << PIN_SPI_MOSI); // Rohan added 
+    PORT->Group[PORTA].DIRCLR.reg = (0x00000001 << PIN_SPI_MOSI); // Rohan added 
+
     PORT->Group[PORTA].PINCFG[17].bit.PMUXEN = 0x1; //Enable Peripheral Multiplexing for SERCOM1 SPI PA17 Arduino PIN13
     PORT->Group[PORTA].PMUX[8].bit.PMUXO = 0x2; //SERCOM 1 is selected for peripheral use of this pad (0x2 selects peripheral function C: SERCOM)
-    // PORT->Group[PORTB].PINCFG[10].bit.PMUXEN = 0x1; //Enable Peripheral Multiplexing for SERCOM1 SPI PA18 Arduino PIN10
-    // PORT->Group[PORTB].PMUX[5].bit.PMUXE = 0x2; //SERCOM 1 is selected for peripheral use of this pad (0x2 selects peripheral function C: SERCOM)
+    PORT->Group[PORTA].DIRCLR.reg = (0x00000001 << PIN_SPI_SCK);
+
+    PORT->Group[PORTB].PINCFG[10].bit.PMUXEN = 0x1; //Enable Peripheral Multiplexing for SERCOM1 SPI PA18 Arduino PIN10
+    PORT->Group[PORTB].PMUX[5].bit.PMUXE = 0x2; //SERCOM 1 is selected for peripheral use of this pad (0x2 selects peripheral function C: SERCOM)
+    PORT->Group[PORTA].DIRCLR.reg = (0x00000001 << PIN_SPI_SS);
+
     PORT->Group[PORTA].PINCFG[19].bit.PMUXEN = 0x1; //Enable Peripheral Multiplexing for SERCOM1 SPI PA19 Arduino PIN12
     PORT->Group[PORTA].PMUX[9].bit.PMUXO = 0x2; //SERCOM 1 is selected for peripheral use of this pad (0x2 selects peripheral function C: SERCOM)
+    PORT->Group[PORTA].DIRSET.reg = (0x00000001 << PIN_SPI_MISO);
     
 /*
 Explanation:
@@ -69,16 +75,21 @@ Px(2n+0/1) corresponds to Portx, PMUX[n] Even=0/Odd=1
   while(SERCOM1->SPI.CTRLA.bit.SWRST || SERCOM1->SPI.SYNCBUSY.bit.SWRST);
   
   //Setting up NVIC
+  NVIC_SetPriority(SERCOM1_IRQn, 3);
   NVIC_EnableIRQ(SERCOM1_IRQn);
   // NOT SURE IF THIS IS RIGHT BECAUSE IT IS LIKE THIS: NVIC_SetPriority (IdNvic, SERCOM_NVIC_PRIORITY);  /* set Priority */
   // and SERCOM_NVIC_PRIORITY is ((1<<__NVIC_PRIO_BITS) - 1) where __NVIC_PRIO_BITS is 2
   // NVIC_SetPriority(SERCOM1_IRQn,2);
-  NVIC_SetPriority(SERCOM1_IRQn, SERCOM_NVIC_PRIORITY);
+  // NVIC_SetPriority(SERCOM1_IRQn, SERCOM_NVIC_PRIORITY);
+  
   
   //Setting Generic Clock Controller!!!!
   GCLK->CLKCTRL.reg = GCLK_CLKCTRL_ID(GCM_SERCOM1_CORE) | //Generic Clock 0
             GCLK_CLKCTRL_GEN_GCLK0 | // Generic Clock Generator 0 is the source
             GCLK_CLKCTRL_CLKEN; // Enable Generic Clock Generator
+
+  SERCOM1->SPI.DBGCTRL.reg = 0; // ROHAN
+  SERCOM1->SPI.BAUD.reg = 0x00; // ROHAN
   
   while(GCLK->STATUS.reg & GCLK_STATUS_SYNCBUSY); //Wait for synchronisation
   
@@ -98,8 +109,8 @@ Px(2n+0/1) corresponds to Portx, PMUX[n] Even=0/Odd=1
   SERCOM1->SPI.CTRLB.bit.SSDE = 0x1; //Slave Selecte Detection Enabled
   SERCOM1->SPI.CTRLB.bit.CHSIZE = 0; //character size 8 Bit
   SERCOM1->SPI.CTRLB.bit.PLOADEN = 0x0; //Disable Preload Data Register
-  //while (SERCOM1->SPI.SYNCBUSY.bit.CTRLB);  
-  
+  while (SERCOM1->SPI.SYNCBUSY.bit.CTRLB);  
+
   //Set up SPI interrupts
   SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_TXC 
 							| SERCOM_SPI_INTFLAG_RXC 
@@ -115,10 +126,10 @@ Px(2n+0/1) corresponds to Portx, PMUX[n] Even=0/Odd=1
   // SERCOM1->SPI.INTENSET.bit.RXC = 0x1; //Receive complete interrupt
   // SERCOM1->SPI.INTENSET.bit.TXC = 0x1; //Receive complete interrupt
   // SERCOM1->SPI.INTENSET.bit.ERROR = 0x1; //Receive complete interrupt
-  SERCOM1->SPI.INTENSET.bit.DRE = 0x0; //Data Register Empty interrupt
+  // SERCOM1->SPI.INTENSET.bit.DRE = 0x0; //Data Register Empty interrupt
   
   //init SPI CLK  
-  SERCOM1->SPI.BAUD.reg = SERCOM_FREQ_REF / (2*4000000u)-1;
+  // SERCOM1->SPI.BAUD.reg = SERCOM_FREQ_REF / (2*4000000u)-1;
   //Enable SPI
   SERCOM1->SPI.CTRLA.bit.ENABLE = 1;
   while(SERCOM1->SPI.SYNCBUSY.bit.ENABLE);
