@@ -1,6 +1,7 @@
 /*
-  TODO : update the description comments.
-  Testing sketch that publishes a message on a MQTT broker, for storing it on a database afterwards.
+  Program for a slave Arduino that receives the return value of the 
+  neural network from a master Arduino, stores it within a buffer,
+  and send the data to a broker after a given time.
 
   The circuit:
   - MKR NB 1500 board
@@ -13,6 +14,7 @@
   
 */
 
+
 #include <ArduinoBearSSL.h>
 #include <ArduinoECCX08.h>
 #include <utility/ECCX08SelfSignedCert.h>
@@ -22,6 +24,14 @@
 
 #include "arduino_secrets.h"
 #include "slaveSPI.h"
+
+// Use flags
+#define STOOPING            1
+#define WALKING             2
+#define SQUATTING           3
+#define STANDING            4
+#define UNUSED              5
+#define ANOMALY             6
 
 /////// Enter your sensitive data in arduino_secrets.h
 const char pinnumber[]   = SECRET_PINNUMBER;
@@ -34,7 +44,6 @@ index 0 : state tag;
 index 1 : duration of the state.*/
 int _data[BUF_SIZE][2];
 const int slavePin = 4;
-byte buf[1] = {0};
 
 /*should be equal to the column count of the data buffer, i.e. the total
 amount of data segments. Note that in most languages, arrays start
@@ -53,15 +62,19 @@ unsigned long lastMillis = 0;
 
 void connectNB();
 void connectMQTT();
-void publishData(uint8_t buf_dat);
+void publishData();
 void clearDataBuffer();
 unsigned long getTime();
+String stateIDToWord(int state_id);
+void newDataReceived(int state_id);
+void publishMessage(char message_buffer[BUF_SIZE]);
+uint8_t circ_shift_left(uint8_t data, uint8_t n);
 
 
 void setup() 
 {
-  Serial.begin(9600);
-  while (!Serial);
+  Serial.begin(115200);
+  // while (!Serial);
 
   if (!ECCX08.begin()) 
   {
@@ -112,9 +125,6 @@ void setup()
 
 void loop() 
 {
-  /*TODO : Poll for master's input*/
-  /*TODO : check for connection only for sending messages ?
-  Send messages while we are connected ?*/
   if (nbAccess.status() != NB_READY || gprs.status() != GPRS_READY) 
     connectNB();
 
@@ -127,18 +137,20 @@ void loop()
   // publish a message roughly every minute.
   if (millis() - lastMillis > 60000)
   {
-    Serial.println("Sending buffer data!");
-    publishData(buf[0]);
+    publishData();
     clearDataBuffer();
     lastMillis = millis();
   }
 }
 
+uint8_t circ_shift_left(uint8_t data, uint8_t n){
+  return (data << n) | (data >> (8 - n));
+}
+
 
 void SERCOM1_Handler(){
   uint8_t data = 0;
-  uint8_t interrupts = SERCOM1->SPI.INTFLAG.reg; //Read SPI interrupt register
-  // buf[0] = data;
+  // uint8_t interrupts = SERCOM1->SPI.INTFLAG.reg; //Read SPI interrupt register
   #ifdef DEBUG
     Serial.println("In SPI Interrupt");
     Serial.print("Interrupt Flag: "); 
@@ -148,8 +160,8 @@ void SERCOM1_Handler(){
   if (SERCOM1->SPI.INTFLAG.bit.SSL && SERCOM1->SPI.INTENSET.bit.SSL) {
     // FLAG IS SET WHEN nSS IS DETECTED GOING LOW
     // you can initialize the variables here, probably start you connection here
-    SERCOM1->SPI.DATA.reg = 0xAB;											// preload shift register with first outgoing data			
-		SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_SSL;
+    SERCOM1->SPI.DATA.reg = 0xAB;                      // preload shift register with first outgoing data      
+    SERCOM1->SPI.INTFLAG.reg = SERCOM_SPI_INTFLAG_SSL;
   }
 
   if (SERCOM1->SPI.INTFLAG.bit.DRE && SERCOM1->SPI.INTENSET.bit.DRE){
@@ -166,8 +178,11 @@ void SERCOM1_Handler(){
   if (SERCOM1->SPI.INTFLAG.bit.RXC && SERCOM1->SPI.INTENSET.bit.RXC) {
     data = SERCOM1->SPI.DATA.bit.DATA; //Read data register
     Serial.print("DATA value is:   ");
-    Serial.println(data);
-    buf[0] = data; // copy data to buffer
+    // Serial.println(data);
+    Serial.println(circ_shift_left(data, 1));
+    
+    // newDataReceived(data);
+    newDataReceived(circ_shift_left(data, 1));
     #ifdef DEBUG
       Serial.println("SPI Data Received Complete Interrupt");
       Serial.print("DATA in DEBUG: ");
@@ -194,12 +209,16 @@ void connectNB()
 {
   Serial.println("Attempting to connect to the cellular network");
 
-  while ((nbAccess.begin(pinnumber) != NB_READY) ||
-         (gprs.attachGPRS() != GPRS_READY)) 
-  {
-    // failed, retry
+  unsigned long time_beginning = millis()/1000;
+  unsigned long current_time = time_beginning;
+  
+  while (((nbAccess.begin(pinnumber) != NB_READY) ||
+         (gprs.attachGPRS() != GPRS_READY)) &&
+         current_time - time_beginning >= 30) {
+    // failed, retry for 30 seconds
     Serial.print(".");
     delay(1000);
+    current_time = millis()/1000;
   }
 
   Serial.println("You're connected to the cellular network");
@@ -212,17 +231,24 @@ void connectMQTT()
   Serial.print(broker);
   Serial.println(" ");
 
-  while (!mqttClient.connect(broker, 8883)) 
+  unsigned long time_beginning = millis()/1000;
+  unsigned long current_time = time_beginning;
+
+  while (!mqttClient.connect(broker, 8883) &&
+      current_time - time_beginning >= 30) 
   {
-    // failed, retry
+    // failed, retry for 30 seconds
     Serial.print(".");
     Serial.println(mqttClient.connectError());
     delay(5000);
+    current_time = millis()/1000;
   }
   Serial.println();
 
   Serial.println("You're connected to the MQTT broker");
   Serial.println();
+
+  // publishMessage("Board online.");
 }
 
 void publishMessage(char message_buffer[BUF_SIZE]) 
@@ -245,7 +271,7 @@ void setMessageBuffer(int state, int duration, char message_buffer[])
   Serial.println("Done.");
 
   doc["DeviceID"] = SECRET_DEVICE_ID;
-  doc["State"] = state;
+  doc["State"] = stateIDToWord(state);
   doc["Duration"] = duration;
 
   Serial.println("Serializing the Json with the message buffer...");
@@ -263,6 +289,10 @@ void newDataReceived(int state_id)
     _dataCount++;
     return;
   }
+
+  // Don't record same data.
+  if (state_id == _data[_dataCount-1][0])
+    return;
 
   // Data lost.
   if (_dataCount >= BUF_SIZE)
@@ -297,28 +327,62 @@ void clearDataBuffer()
   Serial.println("Data deleted.\n");
 }
 
-void publishData(uint8_t buf_dat)
+void publishData()
 {
   int duration_for_publishing = millis();
   if(_dataCount > BUF_SIZE - 1)
     _dataCount = BUF_SIZE -1;
 
   // Closing last segment.
-  //TODO : BUF_SIZE reached case.
   _data[_dataCount][1] = millis() - _data[_dataCount][1];
 
   char message_buffer[BUF_SIZE];
 
-//   for (int i = 0; i < _dataCount; i++)
-//   {
-    int state = 5;
-    int duration = buf_dat;
+   for (int i = 0; i < _dataCount; i++)
+   {
+    int state = _data[i][0]; 
+    int duration = _data[i][1];
     setMessageBuffer(state, duration, message_buffer);
     publishMessage(message_buffer);
     memset(message_buffer, 0, BUF_SIZE);
-//   }
+    // delay(1000);
+   }
 
   duration_for_publishing = millis() - duration_for_publishing;
   Serial.println("Duration for publishing the whole message :");
   Serial.println(duration_for_publishing);
+}
+
+String stateIDToWord(int state_id)
+{
+  switch (state_id)
+    {
+      case STOOPING :
+        return "Stooping ";
+        break;
+
+      case WALKING :
+        return "Walking ";
+        break;
+
+      case SQUATTING :
+        return "Squatting ";
+        break;
+
+      case STANDING :
+        return "Standing ";
+        break;
+
+      case UNUSED :
+        return "Unused ";
+        break;
+
+      case ANOMALY :
+        return "Anomaly ";
+        break;
+
+      default :
+        return "Error";
+        break;
+    }
 }
