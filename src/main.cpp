@@ -70,6 +70,8 @@ void newDataReceived(int state_id);
 void publishMessage(char message_buffer[BUF_SIZE]);
 uint8_t circ_shift_left(uint8_t data, uint8_t n);
 
+int retry_count = 0;
+
 
 void setup() 
 {
@@ -227,6 +229,11 @@ void connectNB()
 
 void connectMQTT() 
 {
+  if (retry_count >= 3){
+    retry_count = 0;
+    return;
+  }
+  
   Serial.print("Attempting to MQTT broker: ");
   Serial.print(broker);
   Serial.println(" ");
@@ -235,13 +242,14 @@ void connectMQTT()
   unsigned long current_time = time_beginning;
 
   while (!mqttClient.connect(broker, 8883) &&
-      current_time - time_beginning >= 30) 
+      (current_time - time_beginning >= 30) && retry_count <= 3) 
   {
     // failed, retry for 30 seconds
     Serial.print(".");
     Serial.println(mqttClient.connectError());
     delay(5000);
     current_time = millis()/1000;
+    retry_count += 1;
   }
   Serial.println();
 
